@@ -1,4 +1,4 @@
-After hasmidpart:
+After hasmidpart and pdg cuts:
 
 #include "TFile.h"
 #include "TTree.h"
@@ -11,12 +11,25 @@ After hasmidpart:
 #include <iostream>
 using namespace std;
 
-double Spherocity(const vector<float>& px, const vector<float>& py, const vector<float>& eta, const vector<int>& isCharged)
+
+bool allowedpdg(int code) {
+    return ( code == 11 || code == -11 || code == 2212 || code == -2212 || code == 211 || code == -211 || code == 321 || code == -321);
+
+}
+
+
+
+
+
+
+
+double Spherocity(const vector<float>& px, const vector<float>& py, const vector<float>& eta, const vector<int>& isCharged,  const vector<int>& pid)
 {
     double sum_pT = 0.0;
     int nCharged = 0;
     for (size_t i = 0; i < px.size(); i++) {
         if (isCharged[i] != 1) continue;
+         if (!allowedpdg(pid.at(i))) continue; 
         if (fabs(eta[i]) >= 0.8) continue;
         double pt = sqrt(px[i]*px[i] + py[i]*py[i]);
         if (pt < 0.15) continue;
@@ -33,6 +46,7 @@ double Spherocity(const vector<float>& px, const vector<float>& py, const vector
         for (size_t j = 0; j < px.size(); j++) {
             double pt = sqrt(px[j]*px[j] + py[j]*py[j]);
             if (isCharged[j] != 1) continue;
+            if (!allowedpdg(pid.at(j))) continue; 
             if (pt < 0.15) continue;
             if (fabs(eta[j]) >= 0.8) continue;
             num += fabs(-nx*py[j] + ny*px[j]);
@@ -48,16 +62,18 @@ void sphero()
     TFile *f = new TFile("hic3.root");
     TTree *t = (TTree*) f->Get("tParticles;104");
     vector<float> *px = 0, *py = 0, *eta = 0;
-    vector<int> *isCharged = nullptr;
+    vector<int> *isCharged = nullptr;  
+    vector<int> *pid = nullptr;
     t->SetBranchAddress("px", &px);
     t->SetBranchAddress("py", &py);
     t->SetBranchAddress("eta", &eta);
     t->SetBranchAddress("isCharged", &isCharged);
+    t->SetBranchAddress("pid", &pid);
 
 double multcut = 0.0;
 {
 
-TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplicity; events", 200, 0, 2500);
+TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplicity; events", 200, 0,500);
     
 
     Long64_t nEvents = t->GetEntries();
@@ -67,9 +83,12 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         int mult = 0;
         
         for (size_t j = 0; j < eta->size(); j++){
+
+            if (!allowedpdg(pid->at(j))) continue; 
             if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
                 mult++;
             }
+            
 
         }
         nCharmult->Fill(mult);
@@ -87,7 +106,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     double yqm[nqm];
     nCharmult->GetQuantiles(nqm, yqm, xqm);
     for (int i = 0; i < nqm; i++) {
-        cout << "Quantile " << xqm[i] << "-> S0 = " << yqm[i] << endl;
+        cout << "Quantile " << xqm[i] << "-> multiplicity = " << yqm[i] << endl;
     }
     int totalEvents =  nCharmult->Integral(1,  nCharmult->GetNbinsX());
     cout << "Total events = " << totalEvents << endl;        
@@ -113,17 +132,19 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         int mult = 0;
         int hasmidpart = 0;
         for (size_t j = 0; j < eta->size(); j++){
+            if (!allowedpdg(pid->at(j))) continue; 
             if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
                 mult++;
             }
             if((*isCharged)[j] == 1 && (((*eta)[j] > -0.8 && (*eta)[j] < 0.8))){
                 hasmidpart++;
             }
+
         }
         if (mult > multcut) continue;
         if (hasmidpart < 1) continue;
 
-        double S0 = Spherocity(*px, *py, *eta, *isCharged);
+        double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
         if (S0 >= 0) hS0->Fill(S0);
     }
     TCanvas *c1 = new TCanvas("c1", "Spherocity", 800,600);
@@ -161,6 +182,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         int mult = 0;
          int hasmidpart = 0;
         for (size_t j = 0; j < eta->size(); j++){
+            if (!allowedpdg(pid->at(j))) continue; 
             if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j] < 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
                 mult++;
             }
@@ -172,7 +194,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         if (mult > multcut) continue;
         if (hasmidpart < 1) continue;
 
-        double S0 = Spherocity(*px, *py, *eta, *isCharged);
+        double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
         if (S0 < 0) continue;
         if (S0 <= yq[3]) {
             int thisEventMult[nPtBins] = {0};
@@ -182,6 +204,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
             int nParticlesThisEventB = 0;
             double sumPtThisEventB = 0.0;
             for (size_t j = 0; j < px->size(); j++) {
+                if (!allowedpdg(pid->at(j))) continue; 
                 if (isCharged->at(j) !=1) continue;
                 double pt = sqrt(px->at(j)*px->at(j) + py->at(j)*py->at(j));
                 if (pt < 0.15) continue;
