@@ -1,0 +1,398 @@
+After hasmidpart:
+
+#include "TFile.h"
+#include "TTree.h"
+#include "TH1F.h"
+#include "TCanvas.h"
+#include "TGraphErrors.h"
+#include "TRandom3.h"
+#include <vector>
+#include <cmath>
+#include <iostream>
+using namespace std;
+
+double Spherocity(const vector<float>& px, const vector<float>& py, const vector<float>& eta, const vector<int>& isCharged)
+{
+    double sum_pT = 0.0;
+    int nCharged = 0;
+    for (size_t i = 0; i < px.size(); i++) {
+        if (isCharged[i] != 1) continue;
+        if (fabs(eta[i]) >= 0.8) continue;
+        double pt = sqrt(px[i]*px[i] + py[i]*py[i]);
+        if (pt < 0.15) continue;
+        sum_pT += pt;
+        nCharged++;
+    }
+    if (sum_pT == 0) return -1.0;
+    if (nCharged < 5) return -1.0;
+    double S0 = 1.0;
+    for (int i = 0; i < 180; i++) {
+        double phi = i * M_PI/180;
+        double nx = cos(phi), ny = sin(phi);
+        double num = 0.0;
+        for (size_t j = 0; j < px.size(); j++) {
+            double pt = sqrt(px[j]*px[j] + py[j]*py[j]);
+            if (isCharged[j] != 1) continue;
+            if (pt < 0.15) continue;
+            if (fabs(eta[j]) >= 0.8) continue;
+            num += fabs(-nx*py[j] + ny*px[j]);
+        }
+        double S = (M_PI*M_PI/4.0) * (num*num) / (sum_pT*sum_pT);
+        if (S < S0) S0 = S;
+    }
+    return S0;
+}
+
+void sphero()
+{
+    TFile *f = new TFile("hic3.root");
+    TTree *t = (TTree*) f->Get("tParticles;104");
+    vector<float> *px = 0, *py = 0, *eta = 0;
+    vector<int> *isCharged = nullptr;
+    t->SetBranchAddress("px", &px);
+    t->SetBranchAddress("py", &py);
+    t->SetBranchAddress("eta", &eta);
+    t->SetBranchAddress("isCharged", &isCharged);
+
+double multcut = 0.0;
+{
+
+TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplicity; events", 200, 0, 2500);
+    
+
+    Long64_t nEvents = t->GetEntries();
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+
+        int mult = 0;
+        
+        for (size_t j = 0; j < eta->size(); j++){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+                mult++;
+            }
+
+        }
+        nCharmult->Fill(mult);
+    }
+
+
+
+
+    TCanvas *c2 = new TCanvas("c2", "charged particle multiplicity, 800, 600)");
+    nCharmult->Draw();
+
+    const int nqm = 10;
+    double xqm[nqm];
+    for (int i = 0; i < nqm; i++) xqm[i] = (i+1)/10.0;
+    double yqm[nqm];
+    nCharmult->GetQuantiles(nqm, yqm, xqm);
+    for (int i = 0; i < nqm; i++) {
+        cout << "Quantile " << xqm[i] << "-> S0 = " << yqm[i] << endl;
+    }
+    int totalEvents =  nCharmult->Integral(1,  nCharmult->GetNbinsX());
+    cout << "Total events = " << totalEvents << endl;        
+    int prevbin = 1;
+    for (int i = 0; i < nqm; i++) {
+        int thisbin =  nCharmult->FindBin(yqm[i]);
+        double count =  nCharmult->Integral(prevbin, thisbin);
+        cout << "Quantile " << i*10 << "-" << (i+1)*10 << " % :" << count << "events" << endl;
+        prevbin = thisbin + 1;
+    }
+
+    multcut = yqm[3];
+
+}
+
+
+
+     TH1F *hS0 = new TH1F("hS0","Spherocity; S_{0};Events",150, 0,1.5);
+    Long64_t nEvents = t->GetEntries();
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+
+        int mult = 0;
+        int hasmidpart = 0;
+        for (size_t j = 0; j < eta->size(); j++){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+                mult++;
+            }
+            if((*isCharged)[j] == 1 && (((*eta)[j] > -0.8 && (*eta)[j] < 0.8))){
+                hasmidpart++;
+            }
+        }
+        if (mult > multcut) continue;
+        if (hasmidpart < 1) continue;
+
+        double S0 = Spherocity(*px, *py, *eta, *isCharged);
+        if (S0 >= 0) hS0->Fill(S0);
+    }
+    TCanvas *c1 = new TCanvas("c1", "Spherocity", 800,600);
+    hS0->Draw("h");
+    const int nq = 10;
+    double xq[nq];
+    for (int i = 0; i < nq; i++) xq[i] = (i+1)/10.0;
+    double yq[nq];
+    hS0->GetQuantiles(nq, yq, xq);
+    for (int i = 0; i < nq; i++) {
+        cout << "Quantile " << xq[i] << "-> S0 = " << yq[i] << endl;
+    }
+    int totalEvents = hS0->Integral(1, hS0->GetNbinsX());
+    cout << "Total events = " << totalEvents << endl;
+    int prevbin = 1;
+    for (int i = 0; i < nq; i++) {
+        int thisbin = hS0->FindBin(yq[i]);
+        double count = hS0->Integral(prevbin, thisbin);
+        cout << "Quantile " << i*10 << "-" << (i+1)*10 << " % :" << count << "events" << endl;
+        prevbin = thisbin + 1;
+    }
+    int nSelectedEvents = 0;
+    vector<int> particlesPerEvent;
+    vector<double> meanPtPerEvent;
+    const int nPtBins = 10;
+    double ptMin = 0.0, ptMax = 5;
+    double binwidth = (ptMax-ptMin)/ nPtBins;
+    vector<int> multBins[nPtBins];
+    vector<int> multBinsB[nPtBins];
+    vector<int> particlesPerEventB;
+    vector<double> meanPtPerEventB;
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+
+        int mult = 0;
+         int hasmidpart = 0;
+        for (size_t j = 0; j < eta->size(); j++){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j] < 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+                mult++;
+            }
+            if((*isCharged)[j] == 1 && (((*eta)[j] > -0.8 && (*eta)[j] < 0.8))){
+                hasmidpart++;
+            }
+
+        }
+        if (mult > multcut) continue;
+        if (hasmidpart < 1) continue;
+
+        double S0 = Spherocity(*px, *py, *eta, *isCharged);
+        if (S0 < 0) continue;
+        if (S0 <= yq[3]) {
+            int thisEventMult[nPtBins] = {0};
+            int thisEventMultB[nPtBins] = {0};
+            int nParticlesThisEvent = 0;
+            double sumPtThisEvent = 0.0;
+            int nParticlesThisEventB = 0;
+            double sumPtThisEventB = 0.0;
+            for (size_t j = 0; j < px->size(); j++) {
+                if (isCharged->at(j) !=1) continue;
+                double pt = sqrt(px->at(j)*px->at(j) + py->at(j)*py->at(j));
+                if (pt < 0.15) continue;
+                if (eta->at(j) >= 0.2 && eta->at(j) <=0.8) {
+                    nParticlesThisEvent++;
+                    sumPtThisEvent += pt;
+                    int bin = round((pt - ptMin)/ binwidth);
+                    if (bin >= 0 && bin < nPtBins) {
+                        thisEventMult[bin]++;
+                    }
+                }
+                if (eta->at(j) <= -0.2 && eta->at(j) >= -0.8) {
+                    nParticlesThisEventB++;
+                    sumPtThisEventB += pt;
+                    int bin = round((pt - ptMin)/ binwidth);
+                    if (bin >= 0 && bin < nPtBins) {
+                        thisEventMultB[bin]++;
+                    }
+                }
+            }
+            nSelectedEvents++;
+            particlesPerEvent.push_back(nParticlesThisEvent);
+            for (int b = 0; b < nPtBins; b++) {
+                multBins[b].push_back(thisEventMult[b]);
+            }
+            double meanPtThisEvent = (nParticlesThisEvent > 0) ? sumPtThisEvent/nParticlesThisEvent : 0.0;
+            meanPtPerEvent.push_back(meanPtThisEvent);
+            particlesPerEventB.push_back(nParticlesThisEventB);
+            for (int b = 0; b < nPtBins; b++) {
+                multBinsB[b].push_back(thisEventMultB[b]);
+            }
+            double meanPtThisEventB = (nParticlesThisEventB > 0) ? sumPtThisEventB/nParticlesThisEventB : 0.0;
+            meanPtPerEventB.push_back(meanPtThisEventB);
+        }
+    }
+    double sumMeanPt = 0.0;
+    for (double val : meanPtPerEvent) sumMeanPt += val;
+    double eventAverageMeanPt = sumMeanPt/meanPtPerEvent.size();
+    cout << "Event-Averaged mean pT (pos eta) = " << eventAverageMeanPt << endl;
+    double sumMeanPtB = 0.0;
+    for (double val : meanPtPerEventB) sumMeanPtB += val;
+    double eventAverageMeanPtB = sumMeanPtB/meanPtPerEventB.size();
+    cout << "Event-Averaged mean pT (neg eta) = " << eventAverageMeanPtB << endl;
+    cout << "Total selected events (0-20% S0) = " << nSelectedEvents << endl;
+    vector<double> avgMult(nPtBins,0.0);
+    vector<double> avgMultB(nPtBins,0.0);
+    for (int b = 0; b < nPtBins; b++) {
+        double sum = 0.0;
+        for (int val : multBins[b]) sum += val;
+        if (!multBins[b].empty()) avgMult[b] = sum/multBins[b].size();
+        double sumB = 0.0;
+        for (int val : multBinsB[b]) sumB += val;
+        if (!multBinsB[b].empty()) avgMultB[b] = sumB/multBinsB[b].size();
+    }
+    cout << "\nAverage multiplicity vector (pos eta):\n";
+    for (double val : avgMult) cout << val << " ";
+    cout << endl;
+    cout << "\nAverage multiplicity vector (neg eta):\n";
+    for (double val : avgMultB) cout << val << " ";
+    cout << endl;
+    vector<double> Q1(nPtBins,0.0);
+    for (int b = 0; b < nPtBins; b++) {
+        double sum = 0.0;
+        int nEventsForBin = 0;
+        for (size_t i = 0; i < particlesPerEvent.size(); i++) {
+            if (particlesPerEvent[i] == 0) continue;
+            sum += (multBins[b][i] / double(particlesPerEvent[i]))*meanPtPerEventB[i];
+            nEventsForBin++;
+        }
+        if (nEventsForBin > 0) Q1[b] = sum / nEventsForBin;
+        else Q1[b] = 0.0;
+    }
+    cout << "Q1";
+    for (int b = 0; b < nPtBins; b++) {
+        cout << "pTbin " << b << ": " << Q1[b] << endl;
+    }
+    vector<double> Q2(nPtBins, 0.0);
+    vector<double> Q3(nPtBins, 0.0);
+    for (int b = 0; b < nPtBins; b++) {
+        double sumFraction = 0.0;
+        double sumMeanPtB2 = 0.0;
+        int nEventsUsed = particlesPerEvent.size();
+        for (int i = 0; i < nEventsUsed; i++) {
+            if (particlesPerEvent[i] > 0) {
+                sumFraction += double(multBins[b][i]) / particlesPerEvent[i];
+                sumMeanPtB2 += meanPtPerEventB[i];
+            }
+        }
+        double avgFraction = sumFraction / nEventsUsed;
+        double avgMeanPtB2 = sumMeanPtB2 / nEventsUsed;
+        Q2[b] = avgFraction * avgMeanPtB2;
+        if (avgFraction != 0) Q3[b] = (Q1[b] - Q2[b]) / avgFraction;
+        else Q3[b] = 0.0;
+    }
+    cout << "Q2";
+    for (int b = 0; b < nPtBins; b++) {
+        cout << "pT bin" << b << ": " << Q2[b] << endl;
+    }
+    cout << "Q3";
+    for (int b = 0; b < nPtBins; b++) {
+        cout << "pT bin " << b << ": " << Q3[b] << endl;
+    }
+    double sumProduct = 0.0;
+    double sumMeanPos = 0.0;
+    double sumMeanNeg = 0.0;
+    int nEventsUsed = meanPtPerEvent.size();
+    for (int i = 0; i < nEventsUsed; i++) {
+        sumProduct += meanPtPerEvent[i] * meanPtPerEventB[i];
+        sumMeanPos += meanPtPerEvent[i];
+        sumMeanNeg += meanPtPerEventB[i];
+    }
+    double avgProduct = sumProduct / nEventsUsed;
+    double avgMeanPos = sumMeanPos / nEventsUsed;
+    double avgMeanNeg = sumMeanNeg / nEventsUsed;
+    double sigma = sqrt(avgProduct - avgMeanPos * avgMeanNeg);
+    cout << "sigma" << sigma << endl;
+    TH1F *hv0 = new TH1F("hv0", "v0(pT); p_{T} (GeV/c); v0", nPtBins, ptMin, ptMax);
+    for (int b = 0; b < nPtBins; b++) {
+        double binCenter = ptMin + (b + 0.5) * binwidth;
+        double v0 = (sigma != 0) ? Q3[b]/sigma : 0.0;
+        hv0->SetBinContent(b+1, v0);
+        cout << "v0(pt)" << v0 << endl;
+    }
+    int nBootstrap = 200;
+    TRandom3 r(12345);
+    vector<vector<double>> v0Boot(nBootstrap, vector<double>(nPtBins,0.0));
+    for (int boot = 0; boot < nBootstrap; boot++) {
+        vector<double> Q1b(nPtBins,0.0), Q2b(nPtBins,0.0), Q3b(nPtBins,0.0);
+        vector<int> partBoot, partBootB;
+        vector<double> meanBoot, meanBootB;
+        vector<int> multBoot[nPtBins], multBootB[nPtBins];
+        for (int i=0; i<nEventsUsed; i++) {
+            int idx = r.Integer(nEventsUsed);
+            partBoot.push_back(particlesPerEvent[idx]);
+            partBootB.push_back(particlesPerEventB[idx]);
+            meanBoot.push_back(meanPtPerEvent[idx]);
+            meanBootB.push_back(meanPtPerEventB[idx]);
+            for (int b=0; b<nPtBins; b++) {
+                multBoot[b].push_back(multBins[b][idx]);
+                multBootB[b].push_back(multBinsB[b][idx]);
+            }
+        }
+        double sumProd=0.0, sumPos=0.0, sumNeg=0.0;
+        for (size_t i=0; i<partBoot.size(); i++) {
+            sumProd += meanBoot[i]*meanBootB[i];
+            sumPos += meanBoot[i];
+            sumNeg += meanBootB[i];
+        }
+        double avgProd=sumProd/partBoot.size();
+        double avgPos=sumPos/partBoot.size();
+        double avgNeg=sumNeg/partBoot.size();
+        double sigmaB=sqrt(avgProd-avgPos*avgNeg);
+        for (int b=0; b<nPtBins; b++) {
+            double sum=0.0; int nEv=0;
+            for (size_t i=0; i<partBoot.size(); i++) {
+                if (partBoot[i]==0) continue;
+                sum += (multBoot[b][i]/double(partBoot[i]))*meanBootB[i];
+                nEv++;
+            }
+            Q1b[b]=(nEv>0)? sum/nEv:0.0;
+        }
+        for (int b=0; b<nPtBins; b++) {
+            double sumFrac=0.0,sumMeanB=0.0;
+            for (size_t i=0; i<partBoot.size(); i++) {
+                if (partBoot[i]>0) {
+                    sumFrac += double(multBoot[b][i])/partBoot[i];
+                    sumMeanB += meanBootB[i];
+                }
+            }
+            double avgFrac=sumFrac/partBoot.size();
+            double avgMeanB=sumMeanB/partBoot.size();
+            Q2b[b]=avgFrac*avgMeanB;
+            Q3b[b]=(avgFrac!=0)? (Q1b[b]-Q2b[b])/avgFrac : 0.0;
+            v0Boot[boot][b]=(sigmaB!=0)? Q3b[b]/sigmaB:0.0;
+        }
+    }
+    vector<double> v0Mean(nPtBins,0.0), v0Err(nPtBins,0.0);
+    for (int b=0;b<nPtBins;b++) {
+        double sum=0.0,sum2=0.0;
+        for (int boot=0;boot<nBootstrap;boot++) {
+            sum+=v0Boot[boot][b];
+            sum2+=v0Boot[boot][b]*v0Boot[boot][b];
+        }
+        v0Mean[b]=sum/nBootstrap;
+        v0Err[b]=sqrt((nBootstrap/(nBootstrap - 1))*sum2/nBootstrap - v0Mean[b]*v0Mean[b]);
+    }
+    TCanvas *cV0=new TCanvas("cV0","v0(pT)",800,600);
+    hv0->SetLineColor(kBlue);
+    hv0->Draw("HIST L");
+    TGraphErrors *gr=new TGraphErrors(nPtBins);
+    for (int b=0;b<nPtBins;b++) {
+        double x=ptMin+(b+0.5)*binwidth;
+        gr->SetPoint(b,x,v0Mean[b]);
+        gr->SetPointError(b,0.0,v0Err[b]);
+    }
+    gr->SetMarkerStyle(20);
+    gr->SetLineColor(kRed);
+    gr->Draw("P SAME");
+
+
+    cout << "\nBootstrap v0 results with errors:" << endl;
+    for (int b=0; b<nPtBins; b++) {
+    double x = ptMin + (b + 0.5) * binwidth;
+    cout << "pT bin " << b 
+         << " (center " << x << " GeV/c): "
+         << " v0 = " << v0Mean[b] 
+         << " ± " << v0Err[b] << endl;
+}
+
+
+
+
+}
+
