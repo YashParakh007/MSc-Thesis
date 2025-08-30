@@ -1,5 +1,3 @@
-After hasmidpart and pdg cuts:
-
 #include "TFile.h"
 #include "TTree.h"
 #include "TH1F.h"
@@ -60,7 +58,7 @@ double Spherocity(const vector<float>& px, const vector<float>& py, const vector
 void sphero()
 {
     TFile *f = new TFile("hic3.root");
-    TTree *t = (TTree*) f->Get("tParticles;104");
+    TTree *t = (TTree*) f->Get("tParticles;520");
     vector<float> *px = 0, *py = 0, *eta = 0;
     vector<int> *isCharged = nullptr;  
     vector<int> *pid = nullptr;
@@ -77,6 +75,8 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     
 
     Long64_t nEvents = t->GetEntries();
+    vector<int> multValues;
+    multValues.reserve(nEvents);
     for (Long64_t i = 0; i < nEvents; i++) {
         t->GetEntry(i);
 
@@ -85,13 +85,15 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         for (size_t j = 0; j < eta->size(); j++){
 
             if (!allowedpdg(pid->at(j))) continue; 
-            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < -3.7))){
                 mult++;
             }
             
 
         }
         nCharmult->Fill(mult);
+        multValues.push_back(mult);
+
     }
 
 
@@ -100,25 +102,26 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     TCanvas *c2 = new TCanvas("c2", "charged particle multiplicity, 800, 600)");
     nCharmult->Draw();
 
+    sort(multValues.begin(), multValues.end());
     const int nqm = 10;
-    double xqm[nqm];
-    for (int i = 0; i < nqm; i++) xqm[i] = (i+1)/10.0;
     double yqm[nqm];
-    nCharmult->GetQuantiles(nqm, yqm, xqm);
     for (int i = 0; i < nqm; i++) {
-        cout << "Quantile " << xqm[i] << "-> multiplicity = " << yqm[i] << endl;
+    int idx = (i + 1) * multValues.size()/ nqm -1;
+    yqm[i] = multValues[idx];
+    
+        cout << "Quantile " << (i+1)*10 << "% -> multiplicity = " << yqm[i] << endl;
     }
-    int totalEvents =  nCharmult->Integral(1,  nCharmult->GetNbinsX());
-    cout << "Total events = " << totalEvents << endl;        
-    int prevbin = 1;
+    
+    cout << "Total events = " << multValues.size() << endl;        
+    int start = 0;
     for (int i = 0; i < nqm; i++) {
-        int thisbin =  nCharmult->FindBin(yqm[i]);
-        double count =  nCharmult->Integral(prevbin, thisbin);
+        int end =  (i + 1) * multValues.size() / nqm;
+        int count =  end - start;
         cout << "Quantile " << i*10 << "-" << (i+1)*10 << " % :" << count << "events" << endl;
-        prevbin = thisbin + 1;
+        start = end;
     }
 
-    multcut = yqm[3];
+    multcut = yqm[8];
 
 }
 
@@ -126,6 +129,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
 
      TH1F *hS0 = new TH1F("hS0","Spherocity; S_{0};Events",150, 0,1.5);
     Long64_t nEvents = t->GetEntries();
+    vector<double> S0Values;
     for (Long64_t i = 0; i < nEvents; i++) {
         t->GetEntry(i);
 
@@ -133,7 +137,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         int hasmidpart = 0;
         for (size_t j = 0; j < eta->size(); j++){
             if (!allowedpdg(pid->at(j))) continue; 
-            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j]< 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < -3.7))){
                 mult++;
             }
             if((*isCharged)[j] == 1 && (((*eta)[j] > -0.8 && (*eta)[j] < 0.8))){
@@ -141,31 +145,40 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
             }
 
         }
-        if (mult > multcut) continue;
+        if (mult < multcut) continue;
         if (hasmidpart < 1) continue;
-
+        
         double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
-        if (S0 >= 0) hS0->Fill(S0);
+        if (S0 >= 0) {hS0->Fill(S0);
+        S0Values.push_back(S0);
     }
+}
     TCanvas *c1 = new TCanvas("c1", "Spherocity", 800,600);
     hS0->Draw("h");
+
+     sort(S0Values.begin(), S0Values.end());
     const int nq = 10;
-    double xq[nq];
-    for (int i = 0; i < nq; i++) xq[i] = (i+1)/10.0;
     double yq[nq];
-    hS0->GetQuantiles(nq, yq, xq);
     for (int i = 0; i < nq; i++) {
-        cout << "Quantile " << xq[i] << "-> S0 = " << yq[i] << endl;
+    int idx = (i + 1) * S0Values.size()/ nq -1;
+    yq[i] = S0Values[idx];
+    
+        cout << "Quantile " << (i+1)*10 << "% -> S0 = " << yq[i] << endl;
     }
-    int totalEvents = hS0->Integral(1, hS0->GetNbinsX());
-    cout << "Total events = " << totalEvents << endl;
-    int prevbin = 1;
+    
+    cout << "Total events = " << S0Values.size() << endl;        
+    int start = 0;
     for (int i = 0; i < nq; i++) {
-        int thisbin = hS0->FindBin(yq[i]);
-        double count = hS0->Integral(prevbin, thisbin);
+        int end =  (i + 1) * S0Values.size() / nq;
+        int count =  end - start;
         cout << "Quantile " << i*10 << "-" << (i+1)*10 << " % :" << count << "events" << endl;
-        prevbin = thisbin + 1;
+        start = end;
     }
+
+
+
+
+
     int nSelectedEvents = 0;
     vector<int> particlesPerEvent;
     vector<double> meanPtPerEvent;
@@ -183,7 +196,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
          int hasmidpart = 0;
         for (size_t j = 0; j < eta->size(); j++){
             if (!allowedpdg(pid->at(j))) continue; 
-            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j] < 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < 3.7))){
+            if ((*isCharged)[j] == 1 && (((*eta)[j] > 2.8 && (*eta)[j] < 5.1) || ((*eta)[j] > -1.7 && (*eta)[j] < -3.7))){
                 mult++;
             }
             if((*isCharged)[j] == 1 && (((*eta)[j] > -0.8 && (*eta)[j] < 0.8))){
@@ -191,12 +204,12 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
             }
 
         }
-        if (mult > multcut) continue;
+        if (mult < multcut) continue;
         if (hasmidpart < 1) continue;
 
         double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
         if (S0 < 0) continue;
-        if (S0 <= yq[3]) {
+        if (S0 >= yq[8]) {
             int thisEventMult[nPtBins] = {0};
             int thisEventMultB[nPtBins] = {0};
             int nParticlesThisEvent = 0;
@@ -211,7 +224,7 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
                 if (eta->at(j) >= 0.2 && eta->at(j) <=0.8) {
                     nParticlesThisEvent++;
                     sumPtThisEvent += pt;
-                    int bin = round((pt - ptMin)/ binwidth);
+                    int bin = floor((pt - ptMin)/ binwidth);
                     if (bin >= 0 && bin < nPtBins) {
                         thisEventMult[bin]++;
                     }
@@ -219,25 +232,26 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
                 if (eta->at(j) <= -0.2 && eta->at(j) >= -0.8) {
                     nParticlesThisEventB++;
                     sumPtThisEventB += pt;
-                    int bin = round((pt - ptMin)/ binwidth);
+                    int bin = floor((pt - ptMin)/ binwidth);
                     if (bin >= 0 && bin < nPtBins) {
                         thisEventMultB[bin]++;
                     }
                 }
             }
-            nSelectedEvents++;
-            particlesPerEvent.push_back(nParticlesThisEvent);
-            for (int b = 0; b < nPtBins; b++) {
-                multBins[b].push_back(thisEventMult[b]);
-            }
-            double meanPtThisEvent = (nParticlesThisEvent > 0) ? sumPtThisEvent/nParticlesThisEvent : 0.0;
-            meanPtPerEvent.push_back(meanPtThisEvent);
-            particlesPerEventB.push_back(nParticlesThisEventB);
-            for (int b = 0; b < nPtBins; b++) {
-                multBinsB[b].push_back(thisEventMultB[b]);
-            }
-            double meanPtThisEventB = (nParticlesThisEventB > 0) ? sumPtThisEventB/nParticlesThisEventB : 0.0;
-            meanPtPerEventB.push_back(meanPtThisEventB);
+          if (nParticlesThisEvent > 0 && nParticlesThisEventB > 0) {
+    double meanPtThisEvent = sumPtThisEvent / nParticlesThisEvent;
+    double meanPtThisEventB = sumPtThisEventB / nParticlesThisEventB;
+
+    nSelectedEvents++;
+    particlesPerEvent.push_back(nParticlesThisEvent);
+    for (int b = 0; b < nPtBins; b++) multBins[b].push_back(thisEventMult[b]);
+    meanPtPerEvent.push_back(meanPtThisEvent);
+
+    particlesPerEventB.push_back(nParticlesThisEventB);
+    for (int b = 0; b < nPtBins; b++) multBinsB[b].push_back(thisEventMultB[b]);
+    meanPtPerEventB.push_back(meanPtThisEventB);
+}
+
         }
     }
     double sumMeanPt = 0.0;
@@ -268,14 +282,14 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     vector<double> Q1(nPtBins,0.0);
     for (int b = 0; b < nPtBins; b++) {
         double sum = 0.0;
-        int nEventsForBin = 0;
-        for (size_t i = 0; i < particlesPerEvent.size(); i++) {
-            if (particlesPerEvent[i] == 0) continue;
+        
+        for (size_t i = 0; i < nSelectedEvents; i++) {
+            
             sum += (multBins[b][i] / double(particlesPerEvent[i]))*meanPtPerEventB[i];
-            nEventsForBin++;
+           
         }
-        if (nEventsForBin > 0) Q1[b] = sum / nEventsForBin;
-        else Q1[b] = 0.0;
+         Q1[b] = sum / nSelectedEvents;
+        
     }
     cout << "Q1";
     for (int b = 0; b < nPtBins; b++) {
@@ -286,15 +300,15 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     for (int b = 0; b < nPtBins; b++) {
         double sumFraction = 0.0;
         double sumMeanPtB2 = 0.0;
-        int nEventsUsed = particlesPerEvent.size();
-        for (int i = 0; i < nEventsUsed; i++) {
-            if (particlesPerEvent[i] > 0) {
+
+        for (int i = 0; i < nSelectedEvents; i++) {
+            
                 sumFraction += double(multBins[b][i]) / particlesPerEvent[i];
                 sumMeanPtB2 += meanPtPerEventB[i];
-            }
+            
         }
-        double avgFraction = sumFraction / nEventsUsed;
-        double avgMeanPtB2 = sumMeanPtB2 / nEventsUsed;
+        double avgFraction = sumFraction / nSelectedEvents;
+        double avgMeanPtB2 = sumMeanPtB2 / nSelectedEvents;
         Q2[b] = avgFraction * avgMeanPtB2;
         if (avgFraction != 0) Q3[b] = (Q1[b] - Q2[b]) / avgFraction;
         else Q3[b] = 0.0;
@@ -310,15 +324,15 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     double sumProduct = 0.0;
     double sumMeanPos = 0.0;
     double sumMeanNeg = 0.0;
-    int nEventsUsed = meanPtPerEvent.size();
-    for (int i = 0; i < nEventsUsed; i++) {
+    
+    for (int i = 0; i < nSelectedEvents; i++) {
         sumProduct += meanPtPerEvent[i] * meanPtPerEventB[i];
         sumMeanPos += meanPtPerEvent[i];
         sumMeanNeg += meanPtPerEventB[i];
     }
-    double avgProduct = sumProduct / nEventsUsed;
-    double avgMeanPos = sumMeanPos / nEventsUsed;
-    double avgMeanNeg = sumMeanNeg / nEventsUsed;
+    double avgProduct = sumProduct / nSelectedEvents;
+    double avgMeanPos = sumMeanPos / nSelectedEvents;
+    double avgMeanNeg = sumMeanNeg / nSelectedEvents;
     double sigma = sqrt(avgProduct - avgMeanPos * avgMeanNeg);
     cout << "sigma" << sigma << endl;
     TH1F *hv0 = new TH1F("hv0", "v0(pT); p_{T} (GeV/c); v0", nPtBins, ptMin, ptMax);
@@ -336,8 +350,8 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         vector<int> partBoot, partBootB;
         vector<double> meanBoot, meanBootB;
         vector<int> multBoot[nPtBins], multBootB[nPtBins];
-        for (int i=0; i<nEventsUsed; i++) {
-            int idx = r.Integer(nEventsUsed);
+        for (int i=0; i<nSelectedEvents; i++) {
+            int idx = r.Integer(nSelectedEvents);
             partBoot.push_back(particlesPerEvent[idx]);
             partBootB.push_back(particlesPerEventB[idx]);
             meanBoot.push_back(meanPtPerEvent[idx]);
