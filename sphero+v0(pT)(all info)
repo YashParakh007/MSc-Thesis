@@ -68,7 +68,10 @@ void sphero()
     t->SetBranchAddress("isCharged", &isCharged);
     t->SetBranchAddress("pid", &pid);
 
+
+
 double multcut = 0.0;
+/*double multcut2 = 0.0;*/
 {
 
 TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplicity; events", 200, 0,500);
@@ -121,7 +124,8 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         start = end;
     }
 
-    multcut = yqm[8];
+    multcut = yqm[4];
+    /*multcut2 = yqm[4];*/
 
 }
 
@@ -145,7 +149,8 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
             }
 
         }
-        if (mult < multcut) continue;
+        if (mult> multcut) continue;
+        /*if (mult > multcut2) continue;*/
         if (hasmidpart < 1) continue;
         
         double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
@@ -204,12 +209,14 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
             }
 
         }
-        if (mult < multcut) continue;
+        if (mult> multcut) continue;
         if (hasmidpart < 1) continue;
 
         double S0 = Spherocity(*px, *py, *eta, *isCharged, *pid);
         if (S0 < 0) continue;
-        if (S0 >= yq[8]) {
+   /*   if (S0 >= yq[4] && S0 < yq[8]) {*/
+       if (S0 >= yq[8]) {
+   /*   if (S0 <= yq[3]) { */
             int thisEventMult[nPtBins] = {0};
             int thisEventMultB[nPtBins] = {0};
             int nParticlesThisEvent = 0;
@@ -335,14 +342,21 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     double avgMeanNeg = sumMeanNeg / nSelectedEvents;
     double sigma = sqrt(avgProduct - avgMeanPos * avgMeanNeg);
     cout << "sigma" << sigma << endl;
-    TH1F *hv0 = new TH1F("hv0", "v0(pT); p_{T} (GeV/c); v0", nPtBins, ptMin, ptMax);
+    TH1F *hv0 = new TH1F("hv0", "v0(pT)(centrality = (0-50)%: S0 = (0-40)%; p_{T} (GeV/c); v0(pT)", nPtBins, ptMin, ptMax);
     for (int b = 0; b < nPtBins; b++) {
         double binCenter = ptMin + (b + 0.5) * binwidth;
         double v0 = (sigma != 0) ? Q3[b]/sigma : 0.0;
         hv0->SetBinContent(b+1, v0);
         cout << "v0(pt)" << v0 << endl;
+    
+   
     }
-    int nBootstrap = 200;
+
+     double v0integrated = sigma  / (0.5 * (avgMeanNeg + avgMeanPos));
+    cout << "v0integrated = " << v0integrated << endl; 
+
+
+   int nBootstrap = 200;
     TRandom3 r(12345);
     vector<vector<double>> v0Boot(nBootstrap, vector<double>(nPtBins,0.0));
     for (int boot = 0; boot < nBootstrap; boot++) {
@@ -370,7 +384,9 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
         double avgProd=sumProd/partBoot.size();
         double avgPos=sumPos/partBoot.size();
         double avgNeg=sumNeg/partBoot.size();
-        double sigmaB=sqrt(avgProd-avgPos*avgNeg);
+        double diff = avgProd - avgPos*avgNeg;
+        if ( diff < 0) diff = 0;
+        double sigmaB=sqrt(diff);
         for (int b=0; b<nPtBins; b++) {
             double sum=0.0; int nEv=0;
             for (size_t i=0; i<partBoot.size(); i++) {
@@ -418,8 +434,37 @@ TH1F *nCharmult = new TH1F("nCharmult", "Charge Particle MUltiplicity; multiplic
     gr->SetLineColor(kRed);
     gr->Draw("P SAME");
 
+    TGraphErrors *grScaled = (TGraphErrors*) gr->Clone("v0Graph_pT_Sphero_scaled");
+    grScaled->SetTitle("v0(pT) scaled (S0 = 80-100)");
+    for (int b = 0; b < grScaled->GetN(); b++) {
+        double x, y;
+        grScaled->GetPoint(b, x, y);
+        double errY = grScaled->GetErrorY(b);
+        if (v0integrated != 0) {
+            grScaled->SetPoint(b, x, y / v0integrated);
+            grScaled->SetPointError(b, 0.0, errY / v0integrated);
+        } else {
+            grScaled->SetPoint(b, x, 0.0);
+            grScaled->SetPointError(b, 0.0, 0.0);
+        }
+    }
 
-    cout << "\nBootstrap v0 results with errors:" << endl;
+    TFile *fout = new TFile("pythiaplots.root", "UPDATE");
+  TDirectory *dir = (TDirectory*) fout->Get("Centrality(0-50)"); 
+ /* TDirectory *dir = fout->mkdir("Centrality(0-50)"); */
+   dir->cd();
+  hv0->SetName("v0_pT_Sphero_80_100");
+    hv0->SetTitle("v0(pT)-Sphero(80-100%)"); 
+    hv0->Write();
+    gr->SetName("v0Graph_pT_Sphero_80_100");
+    gr->SetTitle("v0(pT)-Sphero(80-100%)");     
+    gr->Write(); 
+   hv0scaled->Write();
+   grScaled->Write();
+    fout->Close();
+
+
+  cout << "\nBootstrap v0 results with errors:" << endl;
     for (int b=0; b<nPtBins; b++) {
     double x = ptMin + (b + 0.5) * binwidth;
     cout << "pT bin " << b 
