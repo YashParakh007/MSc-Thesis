@@ -1,0 +1,222 @@
+    #include "Pythia8/Pythia.h"
+#include "Pythia8/HeavyIons.h"
+#include <iostream>
+#include <cmath>
+
+#include "TFile.h"
+#include "TTree.h"
+
+using namespace Pythia8;
+
+//  allowed PDG codes
+bool allowedpdg(int code) {
+    return ( code == 11 || code == -11 || 
+             code == 2212 || code == -2212 || 
+             code == 211 || code == -211 || 
+             code == 321 || code == -321 );
+}
+
+//Spherocity Calculation
+
+double Spherocity(const std::vector<float>& px, const std::vector<float>& py, 
+                  const std::vector<float>& eta, const std::vector<int>& isCharged,  
+                  const std::vector<int>& pid)
+{
+    double sum_pT = 0.0;
+    int nCharged = 0;
+    for (size_t i = 0; i < px.size(); i++) {
+        if (isCharged[i] != 1) continue;
+        if (!allowedpdg(pid.at(i))) continue; 
+        if (fabs(eta[i]) >= 0.8) continue;
+        double pt = sqrt(px[i]*px[i] + py[i]*py[i]);
+        if (pt < 0.15) continue;
+        sum_pT += pt;
+        nCharged++;
+    }
+    if (sum_pT == 0) return -1.0;
+    if (nCharged < 5) return -1.0;
+
+    double S0 = 1.0;
+    for (int i = 0; i < 180; i++) {
+        double phi = i * M_PI/180;
+        double nx = cos(phi), ny = sin(phi);
+        double num = 0.0;
+        for (size_t j = 0; j < px.size(); j++) {
+            double pt = sqrt(px[j]*px[j] + py[j]*py[j]);
+            if (isCharged[j] != 1) continue;
+            if (!allowedpdg(pid.at(j))) continue; 
+            if (pt < 0.15) continue;
+            if (fabs(eta[j]) >= 0.8) continue;
+            num += fabs(-nx*py[j] + ny*px[j]);
+        }
+        double S = (M_PI*M_PI/4.0) * (num*num) / (sum_pT*sum_pT);
+        if (S < S0) S0 = S;
+    }
+    return S0;
+}
+
+
+
+int main()
+{
+    Pythia pythia;
+
+    pythia.readString("Random:setSeed = on");
+    pythia.readString("Random:seed = 24680");
+
+
+
+    pythia.readString("Beams:idA = 1000822080");
+    pythia.readString("Beams:idB = 1000822080");
+    pythia.readString("Beams:eCM = 2760.0");
+    pythia.readString("Beams:frameType = 1");
+    pythia.readString("HeavyIon:SigFitErr = 0.02,0.02,0.1,0.05,0.05,0.0,0.1,0.0");
+    pythia.readString("HeavyIon:SigFitDefPar = 17.24,2.15,0.33,0.0,0.0,0.0,0.0,0.0");
+    pythia.readString("HeavyIon:SigFitNGen = 20");
+
+    pythia.init();
+
+    TFile *file = new TFile("hic5b.root", "RECREATE");
+
+    int ev_eventId;
+    int ev_NpartProj, ev_NpartTarg, ev_Ncoll, ev_Nwounded;  
+    double ev_b;
+    int ev_mult = 0;  
+    int ev_mult_central = 0;
+    double ev_spherocity = 0.0;
+    int ev_mult_pos_eta_A = 0;
+    double ev_sumpT_A = 0.0;
+    int ev_mult_neg_eta_B = 0;
+    double ev_sumpT_B = 0.0;
+
+    std::vector<double> ptBins;
+    for(double pt=0.15; pt<3.0; pt+=0.2) ptBins.push_back(pt);
+    for(double pt=3.0; pt<10.0; pt+=0.5) ptBins.push_back(pt);
+    int nPtBins = ptBins.size();
+    std::vector<int> ev_mult_ptBins(nPtBins, 0);
+
+
+
+
+
+
+
+    TTree *tEvents = new TTree("tEvents", "Event-level info");
+    tEvents->Branch("eventId", &ev_eventId, "eventId/I");
+    tEvents->Branch("NpartProj", &ev_NpartProj, "NpartProj/I");
+    tEvents->Branch("NpartTarg", &ev_NpartTarg, "NpartTarg/I");
+    tEvents->Branch("Ncoll", &ev_Ncoll, "Ncoll/I");
+    tEvents->Branch("Nwounded", &ev_Nwounded, "Nwounded/I");
+    tEvents->Branch("b", &ev_b, "b/D");
+    tEvents->Branch("mult", &ev_mult, "mult/I"); 
+    tEvents->Branch("mult_central", &ev_mult_central, "mult_central/I");
+    tEvents->Branch("spherocity", &ev_spherocity, "spherocity/D");
+    tEvents->Branch("mult_pos_eta_A", &ev_mult_pos_eta_A, "mult_pos_eta_A/I");
+    tEvents->Branch("sumpT_A", &ev_sumpT_A, "sumpT_A/D");
+    tEvents->Branch("mult_neg_eta_B", &ev_mult_neg_eta_B, "mult_neg_eta_B/I");
+    tEvents->Branch("sumpT_B", &ev_sumpT_B, "sumpT_B/D");
+
+    for(int i=0; i<nPtBins; ++i){
+        std::string name = "mult_ptBin_" + std::to_string(i);
+        tEvents->Branch(name.c_str(), &ev_mult_ptBins[i], (name+"/I").c_str());
+    }
+
+
+
+
+    int nEvents = 500000;
+    for (int iEvent = 0; iEvent < nEvents; ++iEvent) {
+        if (!pythia.next()) continue;
+
+        ev_mult = 0;
+        ev_mult_central = 0;
+        ev_mult_pos_eta_A = 0;
+        ev_sumpT_A = 0.0;
+        ev_mult_neg_eta_B = 0;
+        ev_sumpT_B = 0.0;
+        std::fill(ev_mult_ptBins.begin(), ev_mult_ptBins.end(), 0);
+
+        std::vector<float> v_px, v_py, v_eta;
+        std::vector<int> v_isCh, v_pid;
+
+
+
+        for (int i = 0; i < pythia.event.size(); ++i) {
+        const Particle& p = pythia.event[i];
+        if (!p.isFinal()) continue;
+        if (!allowedpdg(p.id())) continue;
+        if (!p.isCharged()) continue;
+
+        double eta = p.eta();
+        double pt  = sqrt(p.px()*p.px() + p.py()*p.py());
+        
+
+
+       
+        if ((eta > 2.8 && eta < 5.1) || (eta > -3.7 && eta < -1.7)) {
+            ev_mult++;
+        }
+
+        
+        if (std::abs(eta) < 0.8) {
+            ev_mult_central++;
+        }
+
+        if (eta > 0.2 && eta < 0.8 && pt >= 0.15) {
+                ev_mult_pos_eta_A++;
+                ev_sumpT_A += pt;
+
+                for (int b = 0; b < nPtBins; ++b) {
+                    double ptLow = ptBins[b];
+                    double ptHigh = (b < nPtBins - 1) ? ptBins[b+1] : 10.0;
+                    if(pt >= ptLow && pt < ptHigh){
+                        ev_mult_ptBins[b]++;
+                        break;
+                    }
+                }
+
+            }
+
+        if (eta > -0.8 && eta < -0.2 && pt >= 0.15) {
+    ev_mult_neg_eta_B++;
+    ev_sumpT_B += pt;
+        }
+
+            v_px.push_back(p.px());
+            v_py.push_back(p.py());
+            v_eta.push_back(eta);
+            v_isCh.push_back(1);
+            v_pid.push_back(p.id());
+
+    }
+
+    
+
+
+
+
+        ev_spherocity = Spherocity(v_px, v_py, v_eta, v_isCh, v_pid);
+        if (ev_spherocity < 0) continue;
+        ev_eventId   = iEvent;
+        ev_NpartProj = pythia.info.hiInfo->nPartProj();
+        ev_NpartTarg = pythia.info.hiInfo->nPartTarg();
+        ev_Ncoll     = pythia.info.hiInfo->nCollND();
+        ev_Nwounded  = pythia.info.hiInfo->nAbsTarg() + pythia.info.hiInfo->nDiffTarg()
+                     + pythia.info.hiInfo->nAbsProj() + pythia.info.hiInfo->nDiffProj();
+        ev_b         = pythia.info.hiInfo->b();
+
+        tEvents->Fill();
+        
+        if (iEvent % 100 == 0) {
+            std::cout << "Processed " << iEvent << " / " << nEvents 
+                      << " events (" 
+                      << 100.0 * iEvent / nEvents << "%)" << std::endl;
+        }
+    }
+
+    tEvents->Write();
+    file->Close();
+
+    pythia.stat();
+    return 0;
+}
