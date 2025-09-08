@@ -8,7 +8,7 @@
 
 using namespace Pythia8;
 
-//  allowed PDG codes
+
 bool allowedpdg(int code) {
     return ( code == 11 || code == -11 || 
              code == 2212 || code == -2212 || 
@@ -16,7 +16,6 @@ bool allowedpdg(int code) {
              code == 321 || code == -321 );
 }
 
-//Spherocity Calculation
 
 double Spherocity(const std::vector<float>& px, const std::vector<float>& py, 
                   const std::vector<float>& eta, const std::vector<int>& isCharged,  
