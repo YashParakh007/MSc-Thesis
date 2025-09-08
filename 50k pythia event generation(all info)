@@ -1,0 +1,140 @@
+#include "Pythia8/Pythia.h"
+#include "Pythia8/HeavyIons.h"
+#include <iostream>
+#include <vector>
+#include "TFile.h"
+#include "TH1F.h"
+#include "TCanvas.h"
+#include "TTree.h"
+
+#include <vector>
+#include <cmath>
+
+using namespace Pythia8;
+
+int main()
+{
+    Pythia pythia;
+    
+    pythia.readString("Beams:idA = 1000822080");
+    pythia.readString("Beams:idB = 1000822080");
+    pythia.readString("Beams:eCM = 2760.0");
+    pythia.readString("Beams:frameType = 1");
+    pythia.readString("HeavyIon:SigFitErr = ""0.02,0.02,0.1,0.05,0.05,0.0,0.1,0.0");
+    pythia.readString("HeavyIon:SigFitDefPar = ""17.24,2.15,0.33,0.0,0.0,0.0,0.0,0.0");
+    pythia.readString("HeavyIon:SigFitNGen = 20");
+
+
+    pythia.init();
+    TFile *file = new TFile("hic3.root", "RECREATE");
+
+    int ev_eventId;
+    int ev_NpartProj, ev_NpartTarg, ev_Ncoll, ev_Nwounded;  
+    double ev_b, ev_sigmaNN;
+    int ev_nCharged, ev_nFinal;
+    double ev_sumET_fwd, ev_sumET_central;
+
+
+     TTree *tEvents = new TTree("tEvents", "Event-level info");
+    tEvents->Branch("eventId", &ev_eventId, "eventId/I");
+    tEvents->Branch("NpartProj", &ev_NpartProj, "NpartProj/I");
+    tEvents->Branch("NpartTarg", &ev_NpartTarg, "NpartTarg/I");
+    tEvents->Branch("Ncoll", &ev_Ncoll, "Ncoll/I");
+    tEvents->Branch("Nwounded", &ev_Nwounded, "Nwounded/I");
+    tEvents->Branch("b", &ev_b, "b/D");
+    
+    tEvents->Branch("nCharged", &ev_nCharged, "nCharged/I");
+    tEvents->Branch("nFinal", &ev_nFinal, "nFinal/I");
+    tEvents->Branch("sumET_fwd", &ev_sumET_fwd, "sumET_fwd/D");
+    tEvents->Branch("sumET_central", &ev_sumET_central, "sumET_central/D");
+
+
+    // particle tree
+
+    std::vector<float> v_px, v_py, v_pz, v_E;
+    std::vector<float> v_pT, v_eta, v_phi, v_ET;
+    std::vector<int> v_pid, v_status, v_isCh;
+
+    TTree *tParticles = new TTree("tParticles", "Per-particle info");
+    tParticles->Branch("px", &v_px);
+    tParticles->Branch("py", &v_py);
+    tParticles->Branch("pz", &v_pz);
+    tParticles->Branch("E",  &v_E);
+    tParticles->Branch("pT", &v_pT);
+    tParticles->Branch("eta", &v_eta);
+    tParticles->Branch("phi", &v_phi);
+    tParticles->Branch("ET",  &v_ET);
+    tParticles->Branch("pid", &v_pid);
+    tParticles->Branch("status", &v_status);
+    tParticles->Branch("isCharged", &v_isCh);
+
+
+    int nEvents = 50000; 
+    for (int iEvent = 0; iEvent < nEvents; ++iEvent) {
+        if (!pythia.next()) continue;
+
+        v_px.clear(); v_py.clear(); v_pz.clear(); v_E.clear();
+        v_pT.clear(); v_eta.clear(); v_phi.clear(); v_ET.clear();
+        v_pid.clear(); v_status.clear(); v_isCh.clear();
+
+        double sumET_fwd = 0.0;
+        double sumET_central = 0.0;
+        int nCharged = 0, nFinal = 0;
+
+        for (int i = 0; i < pythia.event.size(); ++i) {
+            const Particle& p = pythia.event[i];
+            if (!p.isFinal()) continue;
+            ++nFinal;
+
+            double pt  = p.pT();
+            double eta = p.eta();
+            double phi = p.phi();
+            double ET  = (p.e() > 0.0 && p.pAbs() > 0.0) ? p.e() * (pt / p.pAbs()) : 0.0;
+
+            v_px.push_back(p.px());
+            v_py.push_back(p.py());
+            v_pz.push_back(p.pz());
+            v_E.push_back(p.e());
+            v_pT.push_back(pt);
+            v_eta.push_back(eta);
+            v_phi.push_back(phi);
+            v_ET.push_back(ET);
+
+            v_pid.push_back(p.id());
+            v_status.push_back(p.status());
+            v_isCh.push_back(p.isCharged() ? 1 : 0);
+
+
+            if (p.isCharged()) ++nCharged;
+
+            if(eta > 2.8 && eta < 5.1) sumET_fwd +=ET;
+            if (std::abs(eta) < 0.9) sumET_central += ET; 
+        }
+
+
+        ev_eventId   = iEvent;
+        ev_NpartProj = pythia.info.hiInfo->nPartProj();
+        ev_NpartTarg = pythia.info.hiInfo->nPartTarg();
+        ev_Ncoll     = pythia.info.hiInfo->nCollND();
+        ev_Nwounded  = pythia.info.hiInfo->nAbsTarg() + pythia.info.hiInfo->nDiffTarg() +pythia.info.hiInfo->nAbsProj() +pythia.info.hiInfo->nDiffProj();
+        ev_b         = pythia.info.hiInfo->b();
+
+        ev_nCharged  = nCharged;
+        ev_nFinal    = nFinal;
+        ev_sumET_fwd = sumET_fwd;
+        ev_sumET_central = sumET_central;
+
+
+        tEvents->Fill();
+        tParticles->Fill();
+
+    }
+     
+    tEvents->Write();
+    tParticles->Write();
+    file->Close();
+
+    pythia.stat();
+    return 0;
+
+}   
