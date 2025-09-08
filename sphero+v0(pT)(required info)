@@ -1,0 +1,268 @@
+#include "TFile.h"
+#include "TTree.h"
+#include "TH1F.h"
+#include "TCanvas.h"
+#include "TGraphErrors.h"
+#include "TRandom3.h"
+#include <vector>
+#include <cmath>
+#include <iostream>
+using namespace std;
+
+void sphero2()
+{
+    TFile *f = new TFile("hic5.root", "READ");
+    TTree *t = (TTree*) f->Get("tEvents");
+
+    int mult_central;
+    double spherocity;
+    t->SetBranchAddress("mult_central", &mult_central);
+    t->SetBranchAddress("spherocity", &spherocity);
+
+   
+    vector<int> multValues;
+    Long64_t nEvents = t->GetEntries();
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+        multValues.push_back(mult_central);
+    }
+
+    sort(multValues.begin(), multValues.end());
+
+    const int nqm = 10;  
+    double yqm[nqm];
+    for (int i = 0; i < nqm; i++) {
+        int idx = (i + 1) * multValues.size() / nqm - 1;
+        yqm[i] = multValues[idx];
+    }
+
+    
+    cout << "\n==== Multiplicity Quantiles ====\n";
+    for (int i = 0; i < nqm; i++) {
+        cout << "Quantile " << (i+1)*10 
+             << "% -> multiplicity = " << yqm[i] << endl;
+    }
+
+    double multcut = yqm[4];
+  /*  double multcut2 = yqm[6];*/
+    vector<int> mult_sel;
+    vector<double> sphValues;
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+        if (mult_central < multcut ) {
+        sphValues.push_back(spherocity);
+        mult_sel.push_back(mult_central);
+    }
+}
+    TH1F *hSph = new TH1F("hSph", "Spherocity after multiplicity cut;Spherocity;Events", 50, 0, 1.0);
+    for (double val : sphValues) {
+        hSph->Fill(val);
+    }
+
+    cout << "\nEvents after multiplicity cut = " << mult_sel.size() << endl;
+
+    sort(sphValues.begin(), sphValues.end());
+    double sph_qm[nqm];
+    for (int i = 0; i < nqm; i++) {
+        int idx = (i + 1) * sphValues.size() / nqm - 1;
+        sph_qm[i] = sphValues[idx];
+    }
+
+   
+    cout << "\n==== Spherocity Quantiles ====\n";
+    for (int i = 0; i < nqm; i++) {
+        cout << "Quantile " << (i+1)*10 
+             << "% -> spherocity = " << sph_qm[i] << endl;
+    }
+
+   
+    
+    double sphcut  = sph_qm[8];
+
+    
+    int multposeta, multnegeta;
+    double sumpT_A, sumpT_B;
+    t->SetBranchAddress("mult_pos_eta_A", &multposeta);
+    t->SetBranchAddress("mult_neg_eta_B", &multnegeta);
+    t->SetBranchAddress("sumpT_A", &sumpT_A);
+    t->SetBranchAddress("sumpT_B", &sumpT_B);
+
+    
+    const int nBins = 29;
+    int mult_ptBin[nBins];
+    for (int b = 0; b < nBins; b++) {
+        TString brName = Form("mult_ptBin_%d", b);
+        t->SetBranchAddress(brName, &mult_ptBin[b]);
+    }
+
+    
+    Long64_t selectedEvents = 0;
+    vector<double> meanpTpereventA;
+    vector<double> meanpTpereventB;
+    vector<int> multposetaVec;
+    vector< vector<int> > multBins(nBins);
+
+    for (Long64_t i = 0; i < nEvents; i++) {
+        t->GetEntry(i);
+
+        if (mult_central < multcut  && spherocity >= sphcut &&
+            multposeta > 5 && multnegeta > 5 &&
+            sumpT_A > 0 && sumpT_B > 0) {
+
+            selectedEvents++;
+
+            
+            meanpTpereventA.push_back(sumpT_A / multposeta);
+            meanpTpereventB.push_back(sumpT_B / multnegeta);
+
+            
+            multposetaVec.push_back(multposeta);
+
+            
+            for (int b = 0; b < nBins; b++) {
+                multBins[b].push_back(mult_ptBin[b]);
+            }
+        }
+    }
+
+    cout << "\nTotal selected events = " << selectedEvents 
+         << " out of " << nEvents << endl;
+
+    
+    double meanpTA = 0, meanpTB = 0;
+    for (size_t i = 0; i < meanpTpereventA.size(); i++) {
+        meanpTA += meanpTpereventA[i];
+        meanpTB += meanpTpereventB[i];
+    }
+    if (!meanpTpereventA.empty()) {
+        meanpTA /= meanpTpereventA.size();
+        meanpTB /= meanpTpereventB.size();
+    }
+
+    cout << "Mean pT per event for region A (meanpTA) = " << meanpTA << endl;
+    cout << "Mean pT per event for region B (meanpTB) = " << meanpTB << endl;
+
+    
+    vector<double> Q1(nBins, 0.0);
+
+    for (int b = 0; b < nBins; b++) {
+        double sum = 0.0;
+        for (size_t i = 0; i < meanpTpereventB.size(); i++) {
+            double relMult = (double)multBins[b][i] / multposetaVec[i];
+            sum += relMult * meanpTpereventB[i];
+        }
+        if (!meanpTpereventB.empty()) {
+            Q1[b] = sum / meanpTpereventB.size();
+        }
+    }
+
+    
+    cout << "\n==== Q1 values ====\n";
+    for (int b = 0; b < nBins; b++) {
+        cout << "Q1[" << b << "] = " << Q1[b] << endl;
+    }
+
+
+
+    // compute avg fraction <f_A(b)> and Q2 = <f_A(b)> * <[pT]_B>
+vector<double> Q2(nBins, 0.0);
+vector<double> avgFraction(nBins, 0.0);
+
+for (int b = 0; b < nBins; b++) {
+    double sumFrac = 0.0;
+    for (size_t i = 0; i < multBins[b].size(); i++) {
+        // multBins[b][i] is M_b^(i); multposetaVec[i] is M_A^(i)
+        if (multposetaVec[i] > 0) {
+            sumFrac += static_cast<double>(multBins[b][i]) / static_cast<double>(multposetaVec[i]);
+        }
+    }
+    if (!multBins[b].empty()) {
+        avgFraction[b] = sumFrac / multBins[b].size();        // <f_A(b)>
+        Q2[b] = avgFraction[b] * meanpTB;                     // Q2 = <f_A(b)> * <[pT]_B>
+        cout << "avgFraction[" << b << "] = " << avgFraction[b] << endl;
+    }
+}
+
+
+    
+    cout << "\n==== Q2 values ====\n";
+    for (int b = 0; b < nBins; b++) {
+        cout << "Q2[" << b << "] = " << Q2[b] << endl;
+    }
+
+
+      
+    double sigma = 0.0;
+    if (!meanpTpereventA.empty() && !meanpTpereventB.empty()) {
+        double avgProduct = 0.0;
+        for (size_t i = 0; i < meanpTpereventA.size(); i++) {
+            avgProduct += meanpTpereventA[i] * meanpTpereventB[i];
+        }
+        avgProduct /= meanpTpereventA.size();
+
+        double diff = avgProduct - (meanpTA * meanpTB);
+        if (diff > 0) sigma = sqrt(diff);
+        else sigma = 0.0;
+    }
+
+    cout << "\nSigma = " << sigma << endl;
+    
+
+    vector<double> v0(nBins, 0.0);
+
+    for (int b = 0; b < nBins; b++) {
+        if (sigma != 0 && avgFraction[b] != 0) {
+            v0[b] = (Q1[b] - Q2[b]) / (sigma * avgFraction[b]);
+        } else {
+            v0[b] = 0.0; // safe fallback
+        }
+    }
+
+    cout << "\n==== Final R values per bin ====\n";
+    for (int b = 0; b < nBins; b++) {
+        cout << "v0[" << b << "] = " << v0[b] << endl;
+    }
+
+
+
+    vector<double> ptBins;
+for (double pt = 0.15; pt < 3.0; pt += 0.2) ptBins.push_back(pt);
+for (double pt = 3.0; pt < 10.0; pt += 0.5) ptBins.push_back(pt);
+ ptBins.push_back(10.0);
+
+
+
+
+   vector<double> ptCenters;
+    for (size_t i = 0; i < ptBins.size()-1; i++) {
+    ptCenters.push_back(0.5*(ptBins[i] + ptBins[i+1]));
+}
+
+
+
+
+
+
+     TGraph *grV0 = new TGraph(nBins, &ptCenters[0], &v0[0]);
+    grV0->SetTitle("v_{0} vs p_{T} bin center;p_{T} bin center;v_{0}");
+    grV0->SetMarkerStyle(20);
+    grV0->SetMarkerSize(1.2);
+    grV0->SetLineColor(kBlue+1);
+    grV0->SetMarkerColor(kBlue+1);
+
+
+
+     TCanvas *c1 = new TCanvas("c1", "Results", 1200, 600);
+    c1->Divide(2,1);
+
+    c1->cd(1);
+    hSph->Draw();
+
+    c1->cd(2);
+    grV0->Draw("APL");
+
+    c1->SaveAs("sphero2_results.png");
+}
+
+
+
